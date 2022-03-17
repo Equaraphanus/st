@@ -1105,32 +1105,40 @@ xloadsparefonts(void)
 {
 	FcPattern *pattern;
 	double sizeshift, fontval;
-	int fc = 0;
-	int len = 0;
-	char *fp;
-	char *fontnames;
+	int fc = 1;
+	int len;
+	char *c;
+	char **fontnames;
+	char **fp;
 
 	if (frclen != 0)
 		die("can't embed spare fonts. cache isn't empty");
 
-	if (!font2)
+	if (!font2 || !*font2)
 		return;
 
-	/* Duplicate font names into writable memory */
-	fontnames = strdup(font2);
+	/* Count spare fonts */
+	for (c = font2; *c; ++c)
+		fc += *c == ';' && c[1] != 0;
 
-	/* Count spare fonts and make them \0-separated */
-	for (fp = fontnames; *fp; ++fp) {
-		if (*fp == ';') {
-			*fp = 0;
-			fc += fp[1] != 0;
-		}
-		++len;
-	}
+	/* Allocate memory for array of pointers */
+	fontnames = malloc(fc * sizeof(*fontnames));
 
-	if (fc == 0) {
-		free(fontnames);
+	if (!fontnames)
 		return;
+
+	/* Fill the array with copies of font names */
+	c = font2;
+	for (fp = fontnames; fp - fontnames < fc; ++fp) {
+		/* Count the font name length */
+		for (len = 0; *c != ';'; ++c)
+			++len;
+		/* Reserve the required amount of chars (including \0) */
+		*fp = malloc(len + 1);
+		/* Copy the font name to the buffer */
+		strncpy(*fp, c - len, len);
+		(*fp)[len] = 0;
+        ++c;
 	}
 
 	/* Allocate memory for cache entries. */
@@ -1139,15 +1147,14 @@ xloadsparefonts(void)
 		frc = xrealloc(frc, frccap * sizeof(Fontcache));
 	}
 
-	fp = fontnames;
-	do {
-		if (*fp == '-')
-			pattern = XftXlfdParse(fp, False, False);
+	for (fp = fontnames; fp - fontnames < fc; ++fp) {
+		if (**fp == '-')
+			pattern = XftXlfdParse(*fp, False, False);
 		else
-			pattern = FcNameParse((FcChar8 *)fp);
+			pattern = FcNameParse((FcChar8 *)*fp);
 
 		if (!pattern)
-			die("can't open spare font %s\n", fp);
+			die("can't open spare font %s\n", *fp);
 
 		if (defaultfontsize > 0) {
 			sizeshift = usedfontsize - defaultfontsize;
@@ -1167,29 +1174,25 @@ xloadsparefonts(void)
 		XftDefaultSubstitute(xw.dpy, xw.scr, pattern);
 
 		if (xloadsparefont(pattern, FRC_NORMAL))
-			die("can't open spare font %s\n", fp);
+			die("can't open spare font %s\n", *fp);
 
 		FcPatternDel(pattern, FC_SLANT);
 		FcPatternAddInteger(pattern, FC_SLANT, FC_SLANT_ITALIC);
 		if (xloadsparefont(pattern, FRC_ITALIC))
-			die("can't open spare font %s\n", fp);
+			die("can't open spare font %s\n", *fp);
 
 		FcPatternDel(pattern, FC_WEIGHT);
 		FcPatternAddInteger(pattern, FC_WEIGHT, FC_WEIGHT_BOLD);
 		if (xloadsparefont(pattern, FRC_ITALICBOLD))
-			die("can't open spare font %s\n", fp);
+			die("can't open spare font %s\n", *fp);
 
 		FcPatternDel(pattern, FC_SLANT);
 		FcPatternAddInteger(pattern, FC_SLANT, FC_SLANT_ROMAN);
 		if (xloadsparefont(pattern, FRC_BOLD))
-			die("can't open spare font %s\n", fp);
+			die("can't open spare font %s\n", *fp);
 
 		FcPatternDestroy(pattern);
-
-		/* Skip to the next \0 */
-		while (*++fp);
-		++fp;
-	} while (fp - fontnames < len);
+	}
 
 	/* Deallocate list of font names */
 	free(fontnames);
